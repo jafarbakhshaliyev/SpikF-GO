@@ -1,11 +1,3 @@
-# main_ts_with_scaled_and_inverse_metrics.py
-# - Computes & prints BOTH metrics:
-#     (1) SCALED metrics (on scaled data)
-#     (2) ORIG  metrics (after inverse_transform back to original scale)
-# - Saves summary for BOTH (scaled + orig) across 5 runs
-# - Uses train-set scaler for inverse_transform (no leakage)
-# - Reuses same scaler for val/test by passing scaler=train_set.scaler (if your Dataset supports it)
-
 import argparse
 import torch
 import torch.nn as nn
@@ -18,32 +10,25 @@ import warnings
 from spikingjelly.clock_driven import functional
 
 from data.data_loader import (
-    Dataset_ECG, Dataset_Dhfm, Dataset_Solar, Dataset_Wiki, Dataset_PEMS_BAY, Dataset_PEMS
+    Dataset_ECG, Dataset_Dhfm, Dataset_Solar, Dataset_Wiki, Dataset_PEMS_BAY
 )
 from utils.utils import save_model_ts, load_model_ts, evaluate
 
-from model.SpikF_GO import SpikF_GO
-from model.SpikF_GO1 import SpikF_GO1
-from model.SpikF_GO import SpikF_GO2
-from model.SpikF_GO1_CPG import SpikF_GO1_CPG
-from model.SpikF_GO_CPG import SpikF_GO2_CPG
 from model.FourierGNN import FGN
 from model.SpikF import SpikF
 from model.iSpikformer import iSpikformer
+from model.SpikF_GO import SpikF_GO
 from model.SpikF_GO_CPG import SpikF_GO_CPG
 from model.TS_GRU import TSGRU
 from model.TS_TCN import TSTCN
 from model.TS_Former import TSFormer
 from model.SpikeGRU import SpikeGRU
-from model.Spikformer_CPG import SpikformerCPG
+from model.Spikformer_CPG import Spikformer_CPG
 from model.SpikeRNN import SpikeRNN
 from model.SpikeTCN import SpikeTCN
 from model.TS_TCN import TSLIFNode
 
 
-# -----------------------------
-# Spiking reset helpers
-# -----------------------------
 def remove(model):
     """Reset states of spiking neurons with warning suppression"""
     if model is None:
@@ -85,9 +70,6 @@ def reset_states(model):
             model.v = 0.0
 
 
-# -----------------------------
-# Metrics helpers (scaled + inverse)
-# -----------------------------
 def _inverse_if_possible(arr: np.ndarray, scaler):
     """
     Inverse-transform arr of shape (..., D) using scaler fitted on train.
@@ -109,11 +91,6 @@ def _inverse_if_possible(arr: np.ndarray, scaler):
 
 
 def compute_scores_scaled_and_orig(trues: np.ndarray, preds: np.ndarray, scaler):
-    """
-    Returns:
-      score_scaled = (mape, mae, rmse, r2) on scaled arrays
-      score_orig   = (mape, mae, rmse, r2) on inverse-transformed arrays
-    """
     score_scaled = evaluate(trues, preds)
 
     trues_inv = _inverse_if_possible(trues, scaler)
@@ -129,15 +106,13 @@ def _fmt_score(tag, score):
     return f"{tag}: MAPE {mape_pct:10.6f}; MAE {mae:10.6f}; RMSE {rmse:10.6f}; R2 {r2:10.6f}; RSE {rse:10.6f}."
 
 
-# -----------------------------
-# Args
-# -----------------------------
-parser = argparse.ArgumentParser(description='fourier graph network for multivariate time series forecasting')
+# args
+parser = argparse.ArgumentParser(description='SpikF-GO: Spiking Fourier Graph Operators for Multivariate Time Series Forecasting')
 parser.add_argument('--data', type=str, default='ECG', help='data set')
 parser.add_argument('--feature_size', type=int, default=140, help='feature size')
 parser.add_argument('--seq_length', type=int, default=12, help='input length')
 parser.add_argument('--pre_length', type=int, default=12, help='predict length')
-parser.add_argument('--embed_size', type=int, default=128, help='hidden dimensions')
+parser.add_argument('--embed_size', type=int, default=128, help='embedding dimensions')
 parser.add_argument('--hidden_size', type=int, default=256, help='hidden dimensions')
 parser.add_argument('--train_epochs', type=int, default=100, help='train epochs')
 parser.add_argument('--batch_size', type=int, default=4, help='input data batch size')
@@ -161,17 +136,12 @@ parser.add_argument('--blocks', type=int, default=1)
 parser.add_argument('--energy_loss', type=bool, default=False)
 parser.add_argument('--normalize', action='store_false', help='Disable normalization')
 parser.add_argument('--affine', action='store_false', help='Disable affine layer')
-
-# TS-TCN specific
 parser.add_argument('--kernel_size', type=int, default=16)
 
 args = parser.parse_args()
 print(f'Training configs: {args}')
 
 
-# -----------------------------
-# Data config
-# -----------------------------
 data_parser = {
     'traffic':      {'root_path': 'data/traffic.npy',    'type': '0'},
     'ECG':          {'root_path': 'data/ECG_data.csv',   'type': '0'},
@@ -181,10 +151,6 @@ data_parser = {
     'metr':         {'root_path': 'data/metr.csv',       'type': '0'},
     'wiki':         {'root_path': 'data/wiki.csv',       'type': '0'},
     'pems_bay':     {'root_path': 'data/pems-bay.h5',    'type': '0'},
-    'pems03':       {'root_path': 'data/PEMS03.npz',     'type': '0'},
-    'pems04':       {'root_path': 'data/PEMS04.npz',     'type': '0'},
-    'pems07':       {'root_path': 'data/PEMS07.npz',     'type': '0'},
-    'pems08':       {'root_path': 'data/PEMS08.npz',     'type': '0'},
 }
 
 data_dict = {
@@ -196,10 +162,6 @@ data_dict = {
     'electricity': Dataset_ECG,
     'metr':        Dataset_ECG,
     'pems_bay':    Dataset_PEMS_BAY,
-    'pems03':      Dataset_PEMS,
-    'pems04':      Dataset_PEMS,
-    'pems07':      Dataset_PEMS,
-    'pems08':      Dataset_PEMS,
 }
 
 if args.data not in data_parser:
@@ -209,11 +171,6 @@ data_info = data_parser[args.data]
 Data = data_dict[args.data]
 
 
-# -----------------------------
-# Build datasets (IMPORTANT: reuse train scaler for val/test)
-# -----------------------------
-# If your Dataset classes accept scaler=... (recommended), this will reuse it.
-# If they don't accept scaler, remove the scaler=... arguments.
 train_set = Data(
     root_path=data_info['root_path'], flag='train',
     seq_len=args.seq_length, pre_len=args.pre_length,
@@ -245,12 +202,10 @@ print("Val samples:", len(val_set))
 print("Test samples:", len(test_set))
 
 
-MODELS_SET2 = ["TSGRU", "TSTCN", "TSFormer", "SpikformerCPG", "SpikeGRU", "SpikeRNN", "SpikeTCN"]
+MODELS_SET2 = ["TSGRU", "TSTCN", "TSFormer", "Spikformer_CPG", "SpikeGRU", "SpikeRNN", "SpikeTCN"]
 
 
-# -----------------------------
-# Validate/Test (print both metrics)
-# -----------------------------
+
 def validate(model, vali_loader, scaler):
     model.eval()
     cnt = 0
@@ -330,9 +285,6 @@ def test(model, result_test_file, scaler, load_epoch=97):
     return score_scaled, score_orig
 
 
-# -----------------------------
-# Optim/scheduler builder
-# -----------------------------
 def build_opt_sched(model, lr=3e-4, wd=0.01, gate_lr_ratio=0.3,
                     warmup_epochs=8, total_epochs=100):
     decay, no_decay, gate = [], [], []
@@ -344,16 +296,15 @@ def build_opt_sched(model, lr=3e-4, wd=0.01, gate_lr_ratio=0.3,
         is_norm = ('norm' in name_l) or ('bn' in name_l)
         is_embed = ('embeddings' in name_l) or ('time_basis' in name_l)
         if 'freq_gate' in name_l and 'log_alpha' in name_l:
-            gate.append(p)
+            no_decay.append(p)
         elif is_bias or is_norm or is_embed or p.ndim == 1:
             no_decay.append(p)
         else:
             decay.append(p)
 
     optim = torch.optim.AdamW([
-        {'params': decay,     'lr': lr,                'weight_decay': wd},
-        {'params': no_decay,  'lr': lr,                'weight_decay': 0.0},
-        {'params': gate,      'lr': lr * gate_lr_ratio,'weight_decay': 0.0},
+        {'params': decay,    'lr': lr, 'weight_decay': wd},
+        {'params': no_decay, 'lr': lr, 'weight_decay': 0.0},
     ], betas=(0.9, 0.99), eps=1e-8)
 
     warmup = torch.optim.lr_scheduler.LinearLR(
@@ -368,15 +319,11 @@ def build_opt_sched(model, lr=3e-4, wd=0.01, gate_lr_ratio=0.3,
     return optim, sched
 
 
-# -----------------------------
-# Main (5 runs)
-# -----------------------------
+
 if __name__ == '__main__':
-    ei_target = None
 
     seeds = [2021, 2022, 2023, 2024, 2025]
 
-    # Store both SCALED and ORIG results
     scaled_results = {'mape': [], 'mae': [], 'rmse': [], 'r2': [], 'rse': []}
     orig_results   = {'mape': [], 'mae': [], 'rmse': [], 'r2': [], 'rse': []}
 
@@ -398,37 +345,15 @@ if __name__ == '__main__':
 
         device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
-        # Model init
         if args.model == 'SpikF_GO':
             model = SpikF_GO(args, pre_length=args.pre_length, embed_size=args.embed_size,
-                             feature_size=args.feature_size, seq_length=args.seq_length, hidden_size=args.hidden_size)
-            my_optim, my_lr_scheduler = build_opt_sched(
-                model, lr=args.learning_rate, wd=0.01,
-                warmup_epochs=max(4, args.train_epochs//8), total_epochs=args.train_epochs
-            )
-        elif args.model == 'SpikF_GO1':
-            model = SpikF_GO1(args, pre_length=args.pre_length, embed_size=args.embed_size,
                               feature_size=args.feature_size, seq_length=args.seq_length, hidden_size=args.hidden_size)
             my_optim, my_lr_scheduler = build_opt_sched(
                 model, lr=args.learning_rate, wd=0.01,
                 warmup_epochs=max(4, args.train_epochs//8), total_epochs=args.train_epochs
             )
-        elif args.model == 'SpikF_GO2':
-            model = SpikF_GO2(args, pre_length=args.pre_length, embed_size=args.embed_size,
-                              feature_size=args.feature_size, seq_length=args.seq_length, hidden_size=args.hidden_size)
-            my_optim, my_lr_scheduler = build_opt_sched(
-                model, lr=args.learning_rate, wd=0.01,
-                warmup_epochs=max(4, args.train_epochs//8), total_epochs=args.train_epochs
-            )
-        elif args.model == 'SpikF_GO1_CPG':
-            model = SpikF_GO1_CPG(args, pre_length=args.pre_length, embed_size=args.embed_size,
-                                  feature_size=args.feature_size, seq_length=args.seq_length, hidden_size=args.hidden_size)
-            my_optim, my_lr_scheduler = build_opt_sched(
-                model, lr=args.learning_rate, wd=0.01,
-                warmup_epochs=max(4, args.train_epochs//8), total_epochs=args.train_epochs
-            )
-        elif args.model == 'SpikF_GO2_CPG':
-            model = SpikF_GO2_CPG(args, pre_length=args.pre_length, embed_size=args.embed_size,
+        elif args.model == 'SpikF_GO_CPG':
+            model = SpikF_GO_CPG(args, pre_length=args.pre_length, embed_size=args.embed_size,
                                   feature_size=args.feature_size, seq_length=args.seq_length, hidden_size=args.hidden_size)
             my_optim, my_lr_scheduler = build_opt_sched(
                 model, lr=args.learning_rate, wd=0.01,
@@ -451,13 +376,6 @@ if __name__ == '__main__':
                                 tau=args.tau, alpha=args.alpha, hidden_dim=args.hidden_size)
             my_optim = torch.optim.RMSprop(params=model.parameters(), lr=args.learning_rate, eps=1e-08)
             my_lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer=my_optim, gamma=args.decay_rate)
-        elif args.model == 'SpikF_GO_CPG':
-            model = SpikF_GO_CPG(args, pre_length=args.pre_length, embed_size=args.embed_size,
-                                 feature_size=args.feature_size, seq_length=args.seq_length, hidden_size=args.hidden_size)
-            my_optim, my_lr_scheduler = build_opt_sched(
-                model, lr=args.learning_rate, wd=0.01,
-                warmup_epochs=max(4, args.train_epochs//8), total_epochs=args.train_epochs
-            )
         elif args.model == 'TSGRU':
             model = TSGRU(args, hidden_size=args.hidden_size, layers=args.blocks,
                          num_steps=args.T, input_size=args.feature_size)
@@ -471,8 +389,8 @@ if __name__ == '__main__':
             model = TSFormer(args=args)
             my_optim = torch.optim.RMSprop(params=model.parameters(), lr=args.learning_rate, eps=1e-08)
             my_lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer=my_optim, gamma=args.decay_rate)
-        elif args.model == 'SpikformerCPG':
-            model = SpikformerCPG(args=args)
+        elif args.model == 'Spikformer_CPG':
+            model = Spikformer_CPG(args=args)
             my_optim = torch.optim.RMSprop(params=model.parameters(), lr=args.learning_rate, eps=1e-08)
             my_lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer=my_optim, gamma=args.decay_rate)
         elif args.model == 'SpikeGRU':
@@ -495,9 +413,7 @@ if __name__ == '__main__':
         model = model.to(device)
         forecast_loss = nn.MSELoss(reduction='mean').to(device)
 
-        # -------------------
-        # Train
-        # -------------------
+        # train
         for epoch in range(args.train_epochs):
             warm = int(0.3 * args.train_epochs)
             cool = epoch >= warm
@@ -523,29 +439,11 @@ if __name__ == '__main__':
                 else:
                     y_rep = y
 
-                if (args.model in ['SpikF_GO', 'SpikF_GO_CPG', 'SpikF_GO1', 'SpikF_GO2', 'SpikF_GO1_CPG', 'SpikF_GO2_CPG']) and args.energy_loss:
-                    with torch.no_grad():
-                        cur_ei = (aux['enc_rate'].detach() * aux['rho_hat'].detach()).item()
-                        if ei_target is None:
-                            ei_target = cur_ei
-                        else:
-                            ei_target = 0.99 * ei_target + 0.01 * cur_ei
-                    energy = aux['rho_hat']  # ok
-
-                    low, high = 0.04, 0.18
-                    rate = aux['enc_rate']
-                    rate_loss = F.relu(low - rate).pow(2) + F.relu(rate - high).pow(2)
-
-                    ei_loss = (aux['enc_rate'] * aux['rho_hat'] - ei_target) ** 2
-
-                    energy_lambda = (1e-2 if not cool else 2e-2)
-                    spike_lambda  = 1e-2        # <-- change from 1e-3
-                    lambda_ei     = 0.0 if epoch < 5 else 1e-3  # <-- warm-up
-
-                    loss = forecast_loss(forecast, y_rep) \
-                        + energy_lambda * energy \
-                        + spike_lambda * rate_loss \
-                        + lambda_ei * ei_loss
+                if (args.model in ['SpikF_GO', 'SpikF_GO_CPG']) and args.energy_loss:
+                    energy_lambda = 20.0
+                    mse = forecast_loss(forecast, y_rep)
+                    adaptive_lambda = (mse.detach() / 100.0) * energy_lambda
+                    loss = mse + adaptive_lambda * aux["rho_hat"]
                 else:
                     loss = forecast_loss(forecast, y_rep)
 
@@ -566,23 +464,18 @@ if __name__ == '__main__':
             if (epoch + 1) % args.validate_freq == 0:
                 val_loss = validate(model, val_dataloader, train_scaler)
                 enc_rate_v = float(aux.get('enc_rate', torch.tensor(0.0)))
-                gate_l0_v  = float(aux.get('rho_hat', torch.tensor(0.0)))
-                rho_v      = float(aux.get('rho_mean', torch.tensor(0.0)))
+                gate_l0_v = float(aux.get('rho_hat', torch.tensor(0.0)))
                 freq_act_v = float(aux.get('freq_mask_active', torch.tensor(0.0)))
 
-                print('Run {} | epoch {:03d} | {:5.2f}s | train_loss {:5.4f} | val_loss {:5.4f} | enc_rate {:.3f} | gate_L0 {:.3f} | rho {:.3f} | f_active {:.3f}'.format(
+                print('Run {} | epoch {:03d} | {:5.2f}s | train_loss {:5.4f} | val_loss {:5.4f} | enc_rate {:.3f} | gate_L0 {:.3f} | f_active {:.3f}'.format(
                     run_idx + 1, epoch, (time.time() - epoch_start_time), loss_total / max(1, cnt), val_loss,
-                    enc_rate_v, gate_l0_v, rho_v, freq_act_v))
+                    enc_rate_v, gate_l0_v, freq_act_v))
 
-            if (epoch + 1) % 49 == 0:
-                save_model_ts(model, result_train_file, epoch)
+            save_model_ts(model, result_train_file, epoch)
 
         save_model_ts(model, result_train_file, f'final_run_{run_idx+1}')
 
-        # -------------------
-        # Test (both metrics)
-        # -------------------
-        print("=== TEST ===")
+        print("--- TEST ---")
         score_scaled, score_orig = test(model, result_test_file, train_scaler, load_epoch=97)
 
         scaled_results['mape'].append(score_scaled[0])
@@ -598,21 +491,17 @@ if __name__ == '__main__':
         orig_results['rse'].append(score_orig[4])
 
         print(f"Run {run_idx + 1} completed.")
-        print(_fmt_score("SCALED", score_scaled))
-        print(_fmt_score("ORIG  ", score_orig))
+        print(_fmt_score("Results", score_scaled))
 
-    # -------------------
-    # Summary across runs
-    # -------------------
     def _mean_std(arr):
         arr = np.asarray(arr, dtype=np.float64)
         return float(np.mean(arr)), float(np.std(arr))
 
     print(f"\n{'='*60}")
-    print("FINAL RESULTS ACROSS 5 RUNS (SCALED + ORIG)")
+    print("FINAL RESULTS ACROSS RUNS ")
     print(f"{'='*60}")
 
-    for tag, store in [("SCALED", scaled_results), ("ORIG", orig_results)]:
+    for tag, store in [("SCALED", scaled_results)]:
         mape_pct = np.asarray(store['mape'], dtype=np.float64) * 100.0
         m_mean, m_std = _mean_std(mape_pct)
         a_mean, a_std = _mean_std(store['mae'])
@@ -627,12 +516,11 @@ if __name__ == '__main__':
         print(f"R2  : {np.array(store['r2'])}    | mean={r2_mean:.6f} std={r2_std:.6f}")
         print(f"RSE  : {np.array(store['rse'])}    | mean={rse_mean:.6f} std={rse_std:.6f}")
 
-    # Save summary (scaled only, MAPE in percent units)
-    summary_file = os.path.join('output', args.data, args.model, 'summary_results_scaled.txt')
+    summary_file = os.path.join('output', args.data, args.model, 'summary_results.txt')
     os.makedirs(os.path.dirname(summary_file), exist_ok=True)
 
     with open(summary_file, 'w') as f:
-        f.write("Results across 5 runs (SCALED only, MAPE in percent):\n")
+        f.write("Results across 5 runs:\n")
         f.write(f"Seeds used: {seeds}\n\n")
 
         for tag, store in [("SCALED", scaled_results)]:
