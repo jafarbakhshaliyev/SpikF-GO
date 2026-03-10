@@ -7,9 +7,6 @@ from spikingjelly.activation_based import surrogate, neuron, functional
 
 import math
 import copy
-
-from torch import nn
-import torch
 from spikingjelly.activation_based import surrogate, neuron
 from abc import abstractmethod
 import snntorch as snn
@@ -17,7 +14,6 @@ from snntorch import utils
 import warnings
 
 surrogate.ATan = lambda alpha=2.0: SG.apply
-
 
 
 def generate_ones_and_minus_ones_matrix(rows, cols):
@@ -57,14 +53,6 @@ class RandomPE(nn.Module):
         self.register_buffer("pe", pe)
 
     def forward(self, x):
-        # # L, TB, D
-        # if self.pe_mode == "concat":
-        #     x = torch.concat([x, self.pe[: x.size(0), :].repeat(1, x.size(1), 1)], dim=-1)
-        #     # print(x.shape) # L TB D'
-        # elif self.pe_mode == "add":
-        #     x = x + self.pe[:x.size(0), :]
-        # x = self.dropout(x)
-
         # T, B, L, D
         T, B, L, _ = x.shape
         x = x.permute(1, 0, 2, 3)  # B, T, L, D
@@ -126,14 +114,6 @@ class NeuronPE(nn.Module):
         self.register_buffer("pe", pe)
 
     def forward(self, x):
-        # # L, TB, D
-        # if self.pe_mode == "concat":
-        #     x = torch.concat([x, self.pe[: x.size(0), :].repeat(1, x.size(1), 1)], dim=-1)
-        #     # print(x.shape) # L TB D'
-        # elif self.pe_mode == "add":
-        #     x = x + self.pe[:x.size(0), :]
-        # x = self.dropout(x)
-
         # T, B, L, D
         T, B, L, _ = x.shape
         x = x.permute(1, 0, 2, 3)  # B, T, L, D
@@ -402,12 +382,6 @@ class SSA(nn.Module):
         self.q_bn = nn.BatchNorm1d(dim)
 
 
-        # self.q_lif = snn.Leaky(
-        #     beta=0.99,
-        #     spike_grad=SG.apply,
-        #     init_hidden=True,
-        #     output=False,
-        # )
         self.q_tslif = TSLIFNode(
             surrogate_function=SG.apply,
         )
@@ -415,12 +389,7 @@ class SSA(nn.Module):
         self.k_m = nn.Linear(dim, dim)
         self.k_bn = nn.BatchNorm1d(dim)
 
-        # self.k_lif = snn.Leaky(
-        #     beta=0.99,
-        #     spike_grad=SG.apply,
-        #     init_hidden=True,
-        #     output=False,
-        # )
+
         self.k_tslif = TSLIFNode(
             surrogate_function =SG.apply,
         )
@@ -431,19 +400,7 @@ class SSA(nn.Module):
         self.v_tslif = TSLIFNode(
             surrogate_function =SG.apply,
         )
-        # self.v_lif = snn.Leaky(
-        #     beta=0.99,
-        #     spike_grad=SG.apply,
-        #     init_hidden=True,
-        #     output=False,
-        # )
 
-        # self.attn_lif = snn.Leaky(
-        #     beta=0.99,
-        #     spike_grad=SG.apply,
-        #     init_hidden=True,
-        #     output=False,
-        # )
 
         self.attn_tslif = TSLIFNode(
             v_threshold=0.7,
@@ -453,12 +410,6 @@ class SSA(nn.Module):
         self.last_m = nn.Linear(dim, dim)
         self.last_bn = nn.BatchNorm1d(dim)
 
-        # self.last_lif = snn.Leaky(
-        #     beta=0.99,
-        #     spike_grad=SG.apply,
-        #     init_hidden=True,
-        #     output=False,
-        # )
         self.last_tslif = TSLIFNode(
             surrogate_function=SG.apply
         )
@@ -473,29 +424,16 @@ class SSA(nn.Module):
 
         # T, B, L, D = x.shape
         B, T, L, D = x.shape
-        # x_for_qkv = x.flatten(0, 1)  # TB L D
         x_for_qkv = x.flatten(0, 1)  # BT L D
-        # q_m_out = self.q_m(x_for_qkv)  # TB L D
         q_m_out = self.q_m(x_for_qkv) # BT L D
-        # q_m_out = (
-        #     self.q_bn(q_m_out.transpose(-1, -2))
-        #     .transpose(-1, -2)
-        #     .reshape(T, B, L, D)
-        #     .contiguous()
-        # )
+
         q_m_out = (
             self.q_bn(q_m_out.transpose(-1, -2))
             .transpose(-1, -2)
             .reshape(B, T, L, D)
             .contiguous()
         )
-        # q_m_out = self.q_lif(q_m_out)
         q_m_out = self.q_tslif(q_m_out)
-        # q = (
-        #     q_m_out.reshape(T, B, L, self.heads, D // self.heads)
-        #     .permute(0, 1, 3, 2, 4)
-        #     .contiguous()
-        # )
 
         q = (
             q_m_out.reshape(B, T, L, self.heads, D // self.heads)
@@ -512,14 +450,7 @@ class SSA(nn.Module):
             .contiguous()
         )
 
-        # k_m_out = self.k_lif(k_m_out)
         k_m_out = self.k_tslif(k_m_out)
-        # k = (
-        #     k_m_out.reshape(T, B, L, self.heads, D // self.heads)
-        #     .permute(0, 1, 3, 2, 4)
-        #     .contiguous()
-        # )
-
         k = (
             k_m_out.reshape(B, T, L, self.heads, D // self.heads)
             .permute(0, 1, 3, 2, 4)
@@ -534,13 +465,8 @@ class SSA(nn.Module):
             .contiguous()
         )
 
-        # v_m_out = self.v_lif(v_m_out)
         v_m_out = self.v_tslif(v_m_out)
-        # v = (
-        #     v_m_out.reshape(T, B, L, self.heads, D // self.heads)
-        #     .permute(0, 1, 3, 2, 4)
-        #     .contiguous()
-        # )
+
 
         v = (
             v_m_out.reshape(B, T, L, self.heads, D // self.heads)
@@ -551,14 +477,11 @@ class SSA(nn.Module):
         attn = (q @ k.transpose(-2, -1)) * self.qk_scale
         x = attn @ v  # x_shape: T * B * heads * L * D//heads
 
-        # x = x.transpose(2, 3).reshape(T, B, L, D).contiguous()
         x = x.transpose(2, 3).reshape(B, T, L, D).contiguous()
-        # x = self.attn_lif(x)
         x = self.attn_tslif(x)
         x = x.flatten(0, 1)
         x = self.last_m(x)
         x = self.last_bn(x.transpose(-1, -2)).transpose(-1, -2)
-        # x = self.last_lif(x.reshape(B, T, L, D).contiguous())
         x = self.last_tslif(x.reshape(B, T, L, D).contiguous())
         return x
 
@@ -574,7 +497,6 @@ class MLP(nn.Module):
         out_features=None,
     ):
         super().__init__()
-        # self.length = length
         out_features = out_features or in_features
         self.in_features = in_features
         self.hidden_features = hidden_features
@@ -582,14 +504,6 @@ class MLP(nn.Module):
 
         self.fc1 = nn.Linear(in_features, hidden_features)
         self.bn1 = nn.BatchNorm1d(hidden_features)
-
-
-        # self.lif1 = snn.Leaky(
-        #     beta=0.99,
-        #     spike_grad=SG.apply,
-        #     init_hidden=True,
-        #     output=False,
-        # )
 
         self.mlp_tclif1 = TCLIFNode2(
             surrogate_function =SG.apply,
@@ -604,28 +518,13 @@ class MLP(nn.Module):
             surrogate_function =SG.apply,
         )
 
-        # self.lif2 = snn.Leaky(
-        #     beta=0.99,
-        #     spike_grad=SG.apply,
-        #     init_hidden=True,
-        #     output=False,
-        # )
-
     def forward(self, x):
         utils.reset(self.mlp_tclif1)
         utils.reset(self.mlp_tclif2)
         # T, B, L, D = x.shape
         B, T, L, D = x.shape
         x = x.flatten(0, 1) # BT L D
-        # x = x.flatten(0, 1)  # TB L D
         x = self.fc1(x)  # TB L H
-
-        # x = (
-        #     self.bn1(x.transpose(-1, -2))
-        #     .transpose(-1, -2)
-        #     .reshape(T, B, L, self.hidden_features)
-        #     .contiguous()
-        # )
         x = (
             self.bn1(x.transpose(-1, -2))
             .transpose(-1, -2)
@@ -633,15 +532,8 @@ class MLP(nn.Module):
             .contiguous()
         )
         x = self.mlp_tclif1(x)
-        # x = self.lif1(x)
         x = x.flatten(0, 1)  # TB L H
         x = self.fc2(x)  # TB L D
-        # x = (
-        #     self.bn2(x.transpose(-1, -2))
-        #     .transpose(-1, -2)
-        #     .reshape(T, B, L, D)
-        #     .contiguous()
-        # )
         x = (
             self.bn2(x.transpose(-1, -2))
             .transpose(-1, -2)
@@ -649,7 +541,6 @@ class MLP(nn.Module):
             .contiguous()
         )
         x = self.mlp_tclif2(x)
-        # x = self.lif2(x)
         return x
 
 
@@ -1040,14 +931,6 @@ class BaseNode(MemoryModule):
         self.neuronal_charge(x)
         s_s, s_l = self.sl_neuronal_fire()
         spike = self.alpha_s * s_s + self.alpha_l * s_l
-        #self.neuronal_reset(s_s.detach(), s_l.detach()) # additional
-        
-        # additional
-        #if self.training and self.detach_reset:
-            #for key in self._memories.keys():
-              #  if isinstance(self._memories[key], torch.Tensor) and self._memories[key].requires_grad:
-                    #self._memories[key] = self._memories[key].detach()
-
         self.neuronal_reset(s_s, s_l)
         
         return spike
@@ -1095,9 +978,6 @@ class TSLIFNode(BaseNode):
         for i in range(1, self.k + 1):
             self.register_memory('v' + str(i), 0.)
 
-        #self.alpha_s = torch.nn.Parameter(torch.randn([1, hidden_size], dtype=torch.float)) # additional
-        #self.alpha_l = torch.nn.Parameter(torch.randn([1, hidden_size], dtype=torch.float)) # additional
-
 
         self.names = self._memories
         self.hard_reset = hard_reset
@@ -1116,16 +996,8 @@ class TSLIFNode(BaseNode):
             raise ValueError(self.step_mode)
 
     def neuronal_charge(self, x: torch.Tensor):
-        # self.names['v1'] = self.names['v1'] - torch.sigmoid(self.decay_factor[0][0]) * self.names['v2'] + x
-        # self.names['v2'] = self.names['v2'] + torch.sigmoid(self.decay_factor[0][1]) * self.names['v1']
-
-
         self.names['v1'] = self.decay_factor[0] * self.names['v1'] + self.decay_factor[1] * x - self.yy * self.names['v2']
         self.names['v2'] = self.decay_factor[2] * self.names['v2'] + self.decay_factor[3] * x - self.kk * self.names['v1']
-
-        # self.names['v1'] =  self.names['v1'] + (1 - torch.sigmoid(self.decay_factor[0])) * x
-        # self.names['v2'] =  self.names['v2'] + (1 - torch.sigmoid(self.decay_factor[1])) * x - self.names['v1']
-
         self.v = self.names['v2']
         self.v_s = self.names['v1']
 
@@ -1134,15 +1006,10 @@ class TSLIFNode(BaseNode):
             self.names['v1'] = self.jit_soft_reset(self.names['v1'], spike_l, self.gamma)
             self.names['v2'] = self.jit_soft_reset(self.names['v2'], spike_s, self.v_threshold)
         else:
-            # hard reset: reset v1 with long spike, v2..vk with short spike
-            #self.names['v1'] = self.jit_hard_reset(self.names['v1'], spike_l, self.v_reset) # additional
             for i in range(2, self.k + 1):
                 self.names['v' + str(i)] = self.jit_hard_reset(self.names['v' + str(i)], spike_s, self.v_reset)
 
     def forward(self, x: torch.Tensor):
-        # self.v = 0.
-        # self.v1 = 0.
-        # self.v2 = 0.
         return super().single_step_forward(x)
     def extra_repr(self):
         return f"v_threshold={self.v_threshold}, v_reset={self.v_reset}, detach_reset={self.detach_reset}, " \
@@ -1183,16 +1050,9 @@ class BaseNode1(MemoryModule):
         self.backend = backend
 
         self.store_v_seq = store_v_seq
-
-        # self.ada_last = adaptive_last
-        #self.alpha_s = torch.nn.Parameter(torch.randn([1, 2048], dtype=torch.float))
-        #self.alpha_l = torch.nn.Parameter(torch.randn([1, 2048], dtype=torch.float))
         self.alpha_s = torch.nn.Parameter(torch.tensor(0.5, dtype=torch.float)) 
         self.alpha_l = torch.nn.Parameter(torch.tensor(0.5, dtype=torch.float))
 
-
-        # self.v_threshold_s = torch.nn.Parameter(torch.tensor([1.], dtype=torch.float))
-        # self.v_threshold_l = torch.nn.Parameter(torch.tensor([1.], dtype=torch.float))
     @property
     def store_v_seq(self):
         return self._store_v_seq
@@ -1223,7 +1083,6 @@ class BaseNode1(MemoryModule):
         raise NotImplementedError
 
     def neuronal_fire(self):
-        # print('22', self.surrogate_function)
         return self.surrogate_function(self.v - self.v_threshold, 2.0)
 
     def sl_neuronal_fire(self):
@@ -1237,13 +1096,8 @@ class BaseNode1(MemoryModule):
     def single_step_forward(self, x: torch.Tensor):
         self.v_float_to_tensor(x)
         self.neuronal_charge(x)
-        # spike = self.neuronal_fire()
         s_s, s_l = self.sl_neuronal_fire()
-        # test = s_s.sum() - s_l.sum()
-        # print('diff', test)
         spike = self.alpha_s * s_s + self.alpha_l * s_l
-        # spike = self.kappa_s * s_s +self.kappa_l * s_l
-       # self.neuronal_reset(spike)
         self.neuronal_reset(s_s, s_l)
         return spike
 
@@ -1251,9 +1105,6 @@ class BaseNode1(MemoryModule):
 
         #### time series ###
         T = x_seq.shape[-1]
-        # print(x_seq.shape)
-        # print(T)
-        # dsa
         y_seq = []
         if self.store_v_seq:
             v_seq = []
@@ -1264,34 +1115,16 @@ class BaseNode1(MemoryModule):
                 v_seq.append(self.v)
         if self.store_v_seq:
             self.v_seq = torch.stack(v_seq)
-            # print('v_seq', self.v_seq.shape)
         outputs = torch.stack(y_seq, dim=0)
         outputs = outputs.permute(1, 0, 2, 3)
-        # T = x_seq.shape[0]
-        # y_seq = []
-        # if self.store_v_seq:
-        #     v_seq = []
-        # for t in range(T):
-        #     y = self.single_step_forward(x_seq[t])
-        #     y_seq.append(y)
-        #     if self.store_v_seq:
-        #         v_seq.append(self.v)
-        #
-        # if self.store_v_seq:
-        #     self.v_seq = torch.stack(v_seq)
-        # outputs = torch.stack(y_seq, dim=0)
-        # print(outputs.shape)
-        # dsa
+
         return outputs
-        # return torch.stack(y_seq, dim=0)
+
 
     def v_float_to_tensor(self, x: torch.Tensor):
         if isinstance(self.v, float):
             v_init = self.v
             self.v = torch.full_like(x.data, v_init)
-
-#
-
 
 
 
@@ -1328,32 +1161,13 @@ class TCLIFNode2(BaseNode1):
             raise ValueError(self.step_mode)
 
     def neuronal_charge(self, x: torch.Tensor):
-        # self.names['v1'] = self.names['v1'] - torch.sigmoid(self.decay_factor[0][0]) * self.names['v2'] + x
-        # self.names['v2'] = self.names['v2'] + torch.sigmoid(self.decay_factor[0][1]) * self.names['v1']
-        # print(self.decay_factor[0])
-        # print(self.decay_factor[1])
-
         self.names['v1'] = self.decay_factor[0] * self.names['v1'] + self.decay_factor[1] * x - self.yy * self.names['v2']
         self.names['v2'] = self.decay_factor[2] * self.names['v2'] + self.decay_factor[3] * x - self.kk * self.names['v1']
-
-        # self.names['v1'] =  self.names['v1'] + (1 - torch.sigmoid(self.decay_factor[0])) * x
-        # self.names['v2'] =  self.names['v2'] + (1 - torch.sigmoid(self.decay_factor[1])) * x - self.names['v1']
-
         self.v = self.names['v2']
         self.v_s = self.names['v1']
 
     def neuronal_reset(self, spike_s, spike_l):
-        # if self.detach_reset:
-        #     spike_d = spike.detach()
-        # else:
-        #     spike_d = spike
-
-
         if not self.hard_reset:
-            # soft reset
-            # print(type(self.v_threshold))
-            # das
-            # self.names['v1'] = self.jit_soft_reset(self.names['v1'], spike_d, self.gamma)
             self.names['v1'] = self.jit_soft_reset(self.names['v1'], spike_l , self.gamma)
             self.names['v2'] = self.jit_soft_reset(self.names['v2'], spike_s, self.v_threshold)
         else:
@@ -1362,17 +1176,6 @@ class TCLIFNode2(BaseNode1):
                 self.names['v' + str(i)] = self.jit_hard_reset(self.names['v' + str(i)], spike_d,  self.v_reset)
 
     def forward(self, x: torch.Tensor):
-        # self.v = 0.
-        # self.v1 = 0.
-        # self.v2 = 0.
-        # print('kappa_s', self.kappa_s)
-        # print('kappa_l', self.kappa_l)
-        # test= super().single_step_forward(x)
-        # s = test.sum()
-        # print('spike', s)
-        # if x.shape[-1] != 256:
-        #     self.adaptive_sl = x.shape[-1]
-        # return super().multi_step_forward(x)
         return super().single_step_forward(x)
 
     def extra_repr(self):
@@ -1417,32 +1220,13 @@ class TCLIFNode(BaseNode):
             raise ValueError(self.step_mode)
 
     def neuronal_charge(self, x: torch.Tensor):
-        # self.names['v1'] = self.names['v1'] - torch.sigmoid(self.decay_factor[0][0]) * self.names['v2'] + x
-        # self.names['v2'] = self.names['v2'] + torch.sigmoid(self.decay_factor[0][1]) * self.names['v1']
-        # print(self.decay_factor[0])
-        # print(self.decay_factor[1])
-
         self.names['v1'] = self.decay_factor[0] * self.names['v1'] + self.decay_factor[1] * x - self.yy * self.names['v2']
         self.names['v2'] = self.decay_factor[2] * self.names['v2'] + self.decay_factor[3] * x - self.kk * self.names['v1']
-
-        # self.names['v1'] =  self.names['v1'] + (1 - torch.sigmoid(self.decay_factor[0])) * x
-        # self.names['v2'] =  self.names['v2'] + (1 - torch.sigmoid(self.decay_factor[1])) * x - self.names['v1']
-
         self.v = self.names['v2']
         self.v_s = self.names['v1']
 
     def neuronal_reset(self, spike_s, spike_l):
-        # if self.detach_reset:
-        #     spike_d = spike.detach()
-        # else:
-        #     spike_d = spike
-
-
         if not self.hard_reset:
-            # soft reset
-            # print(type(self.v_threshold))
-            # das
-            # self.names['v1'] = self.jit_soft_reset(self.names['v1'], spike_d, self.gamma)
             self.names['v1'] = self.jit_soft_reset(self.names['v1'], spike_l , self.gamma)
             self.names['v2'] = self.jit_soft_reset(self.names['v2'], spike_s, self.v_threshold)
         else:
@@ -1451,17 +1235,6 @@ class TCLIFNode(BaseNode):
                 self.names['v' + str(i)] = self.jit_hard_reset(self.names['v' + str(i)], spike_d,  self.v_reset)
 
     def forward(self, x: torch.Tensor):
-        # self.v = 0.
-        # self.v1 = 0.
-        # self.v2 = 0.
-        # print('kappa_s', self.kappa_s)
-        # print('kappa_l', self.kappa_l)
-        # test= super().single_step_forward(x)
-        # s = test.sum()
-        # print('spike', s)
-        # if x.shape[-1] != 256:
-        #     self.adaptive_sl = x.shape[-1]
-        # return super().multi_step_forward(x)
         return super().single_step_forward(x)
     def extra_repr(self):
         return f"v_threshold={self.v_threshold}, v_reset={self.v_reset}, detach_reset={self.detach_reset}, " \
@@ -1578,21 +1351,15 @@ class TSFormer(nn.Module):
         if self.pe_type != "none":
             x = self.pe(x)  # T B L C'
         T, B, L, _ = x.shape
-
-        #print(x.shape)
-
         x = self.encoder(x.flatten(0, 1)).reshape(T, B, L, -1)  # T B L D
-        #print(x.shape)
         x = self.init_lif(x)
 
         for blk in self.blocks:
             x = blk(x)  # T B L D
         out = x.mean(0) # B L D
-        #print(out.shape)
         out = self.fc(out.flatten(-2, -1)).reshape(-1, self.pre_length, self.feature_size)  # B D L -> B L D
-        #print(out.shape)
         if self.args.normalize:
             out = out * std + mean  # denormalization
-        aux = {'gate_l0': torch.tensor(0.0, device=out.device)}
+        aux = {'gate_l0': torch.tensor(0.0, device=out.device)} # placeholder
         return out, aux  # B D L -> B L D
 

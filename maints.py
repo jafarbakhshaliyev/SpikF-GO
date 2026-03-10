@@ -24,9 +24,9 @@ from utils.utils import save_model_ts, load_model_ts, evaluate
 
 from model.SpikF_GO import SpikF_GO
 from model.SpikF_GO1 import SpikF_GO1
-from model.SpikF_GO2 import SpikF_GO2
+from model.SpikF_GO import SpikF_GO2
 from model.SpikF_GO1_CPG import SpikF_GO1_CPG
-from model.SpikF_GO2_CPG import SpikF_GO2_CPG
+from model.SpikF_GO_CPG import SpikF_GO2_CPG
 from model.FourierGNN import FGN
 from model.SpikF import SpikF
 from model.iSpikformer import iSpikformer
@@ -34,10 +34,10 @@ from model.SpikF_GO_CPG import SpikF_GO_CPG
 from model.TS_GRU import TSGRU
 from model.TS_TCN import TSTCN
 from model.TS_Former import TSFormer
-from model.spikegru import SpikeGRU
-from model.spikformer_cpg import SpikformerCPG
-from model.spikernn import SpikeRNN
-from model.spiketcn import SpikeTCN
+from model.SpikeGRU import SpikeGRU
+from model.Spikformer_CPG import SpikformerCPG
+from model.SpikeRNN import SpikeRNN
+from model.SpikeTCN import SpikeTCN
 from model.TS_TCN import TSLIFNode
 
 

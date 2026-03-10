@@ -225,16 +225,14 @@ class SpikeGRU(nn.Module):
         for i in range(length):
             spks, mems = self.net(h[:, i, :])
         spks = spks.reshape(bs, c_num * hidden_size, -1)  # B, CH, Time Step
-        #mems = mems.reshape(bs, c_num * hidden_size, -1)  # B, CH, Time Step
         spks = spks[:, :, -1]  # aggregate over time dimension shape, (B, CH)
         preds = self.fc(spks.view(bs, c_num, -1)).squeeze(-1) # B, O, C
-        #print(preds.size())
         preds = preds.permute(0, 2, 1).contiguous()
 
         if self.args.normalize:
             preds = preds * std + mean  # denormalize
 
-        aux = {'gate_l0': torch.tensor(0.0, device=preds.device)}
+        aux = {'gate_l0': torch.tensor(0.0, device=preds.device)} # palceholder
 
         return preds, aux
 

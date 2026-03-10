@@ -122,8 +122,7 @@ class iSpikformer(nn.Module):
             x = x + mean.repeat(T, 1, 1, 1)
 
         aux = {
-                 # <— NEW
-            'gate_l0': torch.tensor(0.0, device=x.device)  # Placeholder for compatibility
+            'gate_l0': torch.tensor(0.0, device=x.device)  # placeholder
         }
         
         return x.mean(dim=0), aux

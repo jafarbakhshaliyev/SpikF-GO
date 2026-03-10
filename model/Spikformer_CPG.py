@@ -16,6 +16,7 @@ backend = "torch"
 detach_reset = True
 
 
+
 @dataclass
 class CPG(nn.Module):
     num_neurons: int = 40
@@ -64,9 +65,6 @@ class CPGLinear(nn.Module):
         return self.inp_linear(x) + self.cpg_linear(cpg)
 
 
-tau = 2.0  # beta = 1 - 1/tau
-backend = "torch"
-detach_reset = True
 
 
 class RepeatEncoder(nn.Module):
@@ -382,7 +380,7 @@ class Block(nn.Module):
         return x
 
 
-class SpikformerCPG(nn.Module):
+class Spikformer_CPG(nn.Module):
     def __init__(
         self,
         args,
@@ -482,9 +480,8 @@ class SpikformerCPG(nn.Module):
             x = blk(x)  # T B L D
         out = x.mean(0)
         out = self.fc(out.flatten(-2, -1)).reshape(-1, self.pre_length, self.input_size)  # B D L -> B L D
-        #print(out.shape)
         if self.args.normalize:
             out = out * std + mean  # denormalization
-        aux = {'gate_l0': torch.tensor(0.0, device=out.device)}
+        aux = {'gate_l0': torch.tensor(0.0, device=out.device)} # placeholder
         return out, aux  # B D L -> B L D
 

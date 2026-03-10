@@ -1,13 +1,17 @@
 from typing import Optional
-
+from pathlib import Path
 import torch
 from torch import nn
-from torch.nn.utils import weight_norm
-import snntorch as snn
-from snntorch import surrogate
-from snntorch import utils
-import copy
+from spikingjelly.activation_based import surrogate, neuron, functional
 import math
+import copy
+
+
+tau = 2.0 
+backend = "torch"
+detach_reset = True
+
+
 
 def generate_ones_and_minus_ones_matrix(rows, cols):
     random_matrix = torch.randint(0, 2, (rows, cols))
@@ -46,14 +50,6 @@ class RandomPE(nn.Module):
         self.register_buffer("pe", pe)
 
     def forward(self, x):
-        # # L, TB, D
-        # if self.pe_mode == "concat":
-        #     x = torch.concat([x, self.pe[: x.size(0), :].repeat(1, x.size(1), 1)], dim=-1)
-        #     # print(x.shape) # L TB D'
-        # elif self.pe_mode == "add":
-        #     x = x + self.pe[:x.size(0), :]
-        # x = self.dropout(x)
-
         # T, B, L, D
         T, B, L, _ = x.shape
         x = x.permute(1, 0, 2, 3)  # B, T, L, D
@@ -115,14 +111,6 @@ class NeuronPE(nn.Module):
         self.register_buffer("pe", pe)
 
     def forward(self, x):
-        # # L, TB, D
-        # if self.pe_mode == "concat":
-        #     x = torch.concat([x, self.pe[: x.size(0), :].repeat(1, x.size(1), 1)], dim=-1)
-        #     # print(x.shape) # L TB D'
-        # elif self.pe_mode == "add":
-        #     x = x + self.pe[:x.size(0), :]
-        # x = self.dropout(x)
-
         # T, B, L, D
         T, B, L, _ = x.shape
         x = x.permute(1, 0, 2, 3)  # B, T, L, D
@@ -134,7 +122,6 @@ class NeuronPE(nn.Module):
             # print(x.shape) # B, TL, D'
         elif self.pe_mode == "add":
             # [B, TL, D] + [1, TL, Neur]
-            # print(self.pe[:x.size(-2), :].shape)
             x = x + self.pe[: x.size(-2), :].transpose(0, 1)
             # print(x.shape) # B, TL, D
         x = x.transpose(0, 1)  # TL, B D
@@ -279,25 +266,49 @@ class PositionEmbedding(nn.Module):
         return x  # T, B, L, D'
 
 
-
-
-
-
 class RepeatEncoder(nn.Module):
     def __init__(self, output_size: int):
         super().__init__()
         self.out_size = output_size
-        self.lif = snn.Leaky(
-            beta=0.99, spike_grad=surrogate.atan(), init_hidden=True, output=False
+        self.lif = neuron.LIFNode(
+            tau=tau,
+            step_mode="m",
+            detach_reset=detach_reset,
+            surrogate_function=surrogate.ATan(),
         )
 
     def forward(self, inputs: torch.Tensor):
-        # inputs: batch, L, C
+        # inputs: B, L, C
         inputs = inputs.repeat(
             tuple([self.out_size] + torch.ones(len(inputs.size()), dtype=int).tolist())
-        )  # out_size batch L C
-        inputs = inputs.permute(1, 0, 3, 2)  # batch out_size L C
-        spks = self.lif(inputs)
+        )  # T B L C
+        inputs = inputs.permute(0, 1, 3, 2)  # T B C L
+        spks = self.lif(inputs)  # T B C L
+        return spks
+
+
+class DeltaEncoder(nn.Module):
+    def __init__(self, output_size: int):
+        super().__init__()
+        self.norm = nn.BatchNorm2d(1)
+        self.enc = nn.Linear(1, output_size)
+        self.lif = neuron.LIFNode(
+            tau=tau,
+            step_mode="m",
+            detach_reset=detach_reset,
+            surrogate_function=surrogate.ATan(),
+        )
+
+    def forward(self, inputs: torch.Tensor):
+        # inputs: B, L, C
+        delta = torch.zeros_like(inputs)
+        delta[:, 1:] = inputs[:, 1:, :] - inputs[:, :-1, :]
+        delta = delta.unsqueeze(1).permute(0, 1, 3, 2)  # B, 1, C, L
+        delta = self.norm(delta)
+        delta = delta.permute(0, 2, 3, 1)  # B, C, L, 1
+        enc = self.enc(delta)  # B, C, L, T
+        enc = enc.permute(3, 0, 1, 2)  # T, B, C, L
+        spks = self.lif(enc)
         return spks
 
 
@@ -314,60 +325,20 @@ class ConvEncoder(nn.Module):
             ),
             nn.BatchNorm2d(output_size),
         )
-        self.lif = snn.Leaky(
-            beta=0.99,
-            spike_grad=surrogate.atan(alpha=2.0),
-            init_hidden=True,
-            output=False,
+        self.lif = neuron.LIFNode(
+            tau=tau,
+            step_mode="m",
+            detach_reset=detach_reset,
+            surrogate_function=surrogate.ATan(),
         )
 
     def forward(self, inputs: torch.Tensor):
-        # inputs: batch, L, C
-        inputs = inputs.permute(0, 2, 1).unsqueeze(1)  # batch, 1, C, L
-        enc = self.encoder(inputs)  # batch, output_size, C, L
-        spks = self.lif(enc)
+        # inputs: B, L, C
+        inputs = inputs.permute(0, 2, 1).unsqueeze(1)  # B, 1, C, L
+        enc = self.encoder(inputs)  # B, T, C, L
+        enc = enc.permute(1, 0, 2, 3)  # T, B, C, L
+        spks = self.lif(enc)  # T, B, C, L
         return spks
-
-
-class DeltaEncoder(nn.Module):
-    def __init__(self, output_size: int):
-        super().__init__()
-        self.norm = nn.BatchNorm2d(1)
-        self.enc = nn.Linear(1, output_size)
-        self.lif = snn.Leaky(
-            beta=0.99, spike_grad=surrogate.atan(), init_hidden=True, output=False
-        )
-
-    def forward(self, inputs: torch.Tensor):
-        # inputs: batch, L, C
-        delta = torch.zeros_like(inputs)
-        delta[:, 1:] = inputs[:, 1:, :] - inputs[:, :-1, :]
-        delta = delta.unsqueeze(1).permute(0, 1, 3, 2)  # batch, 1, C, L
-        delta = self.norm(delta)
-        delta = delta.permute(0, 2, 3, 1)  # batch, C, L, 1
-        enc = self.enc(delta)  # batch, C, L, output_size
-        enc = enc.permute(0, 3, 1, 2)  # batch, output_size, C, L
-        spks = self.lif(enc)
-        return spks
-
-
-
-class Chomp1d(nn.Module):
-    def __init__(self, chomp_size):
-        super().__init__()
-        self.chomp_size = chomp_size
-
-    def forward(self, x):
-        return x[:, :, : -self.chomp_size].contiguous()
-
-
-class Chomp2d(nn.Module):
-    def __init__(self, chomp_size):
-        super().__init__()
-        self.chomp_size = chomp_size
-
-    def forward(self, x):
-        return x[:, :, :, : -self.chomp_size].contiguous()
 
 
 
@@ -386,155 +357,59 @@ SpikeEncoder = {
 
 
 
-class SpikeTemporalBlock2D(nn.Module):
-    def __init__(
-        self,
-        n_inputs,
-        n_outputs,
-        kernel_size,
-        stride,
-        dilation,
-        padding,
-        num_steps=4,
-    ):
+class SpikeRNNCell(nn.Module):
+    def __init__(self, input_size: int, output_size: int):
         super().__init__()
-        self.num_steps = num_steps
-        self.conv1 = weight_norm(
-            nn.Conv2d(
-                n_inputs,
-                n_outputs,
-                (1, kernel_size),
-                stride=stride,
-                padding=(0, padding),
-                dilation=(1, dilation),
-            )
+        self.input_size = input_size
+        self.linear = nn.Linear(input_size, output_size)
+        self.lif = neuron.LIFNode(
+            tau=tau,
+            step_mode="m",
+            detach_reset=detach_reset,
+            surrogate_function=surrogate.ATan(),
         )
-        self.bn1 = nn.BatchNorm2d(n_outputs)
-        self.chomp1 = Chomp2d(padding)
-        self.lif1 = snn.Leaky(
-            beta=0.99,
-            spike_grad=surrogate.atan(alpha=2.0),
-            init_hidden=True,
-            threshold=1.0,
-        )
-
-        self.conv2 = weight_norm(
-            nn.Conv2d(
-                n_outputs,
-                n_outputs,
-                (1, kernel_size),
-                stride=stride,
-                padding=(0, padding),
-                dilation=(1, dilation),
-            )
-        )
-        self.bn2 = nn.BatchNorm2d(n_outputs)
-        self.chomp2 = Chomp2d(padding)
-        self.lif2 = snn.Leaky(
-            beta=0.99,
-            spike_grad=surrogate.atan(alpha=2.0),
-            init_hidden=True,
-            threshold=1.0,
-        )
-
-        self.downsample = (
-            nn.Conv2d(n_inputs, n_outputs, (1, 1)) if n_inputs != n_outputs else None
-        )
-        self.lif = snn.Leaky(
-            beta=0.99,
-            spike_grad=surrogate.atan(alpha=2.0),
-            init_hidden=True,
-            threshold=1.0,
-        )
-
-    def init_weights(self):
-        self.conv1.weight.data.normal_(0, 0.01)
-        self.conv2.weight.data.normal_(0, 0.01)
-        if self.downsample is not None:
-            self.downsample.weight.data.normal_(0, 0.01)
 
     def forward(self, x):
-        out1 = self.chomp1(self.bn1(self.conv1(x)))
-        spk_rec1 = []
-        for _ in range(self.num_steps):
-            spk = self.lif1(out1)
-            spk_rec1.append(spk)
-        spks1 = torch.stack(spk_rec1, dim=-1)  # spks1: B, H, C, L, T
-        spks1 = spks1.mean(-1)  # spks1: B, H, C, L
-
-        out2 = self.chomp2(self.bn2(self.conv2(spks1)))
-        spk_rec2 = []
-        for _ in range(self.num_steps):
-            spk = self.lif2(out2)
-            spk_rec2.append(spk)
-        spks2 = torch.stack(spk_rec2, dim=-1)  # spks2: B, H, C, L, T
-        spks2 = spks2.mean(-1)  # spks2: B, H, C, L
-
-        if torch.isnan(spks2).any() or torch.isinf(spks2).any():
-            print("illegal value in TemporalBlock2D")
-
-        if self.downsample is None:
-            res = x
-        else:
-            res = self.downsample(x)
-        spk_rec3 = []
-        for _ in range(self.num_steps):
-            spk = self.lif(spks2 + res)
-            spk_rec3.append(spk)
-
-        res = torch.stack(spk_rec3, dim=-1)  # res: B, H, C, L, T
-        res = res.mean(-1)
-
-        return res
+        # T, B, L, C'
+        T, B, L, _ = x.shape
+        x = x.flatten(0, 1)  # TB, L, C'
+        x = self.linear(x)
+        x = x.reshape(T, B, L, -1)
+        x = self.lif(x)  # T, B, L, C'
+        return x
 
 
-class SpikeTCN(nn.Module):
-    
+class SpikeRNN(nn.Module):
 
     def __init__(
         self,
         args,
-        num_levels: int=3,
-        channel: int=16,
-        dilation: int=2,
-        stride: int = 1,
-        num_steps: int = 16,
-        kernel_size: int = 2,
-        dropout: float = 0.2,
-        max_length: int = 100,
+        hidden_size: int,
+        layers: int = 1,
+        num_steps: int = 4,
         input_size: Optional[int] = None,
-        hidden_size: int = 128,
+        max_length: Optional[int] = 5000,
+        weight_file: Optional[Path] = None,
         encoder_type: Optional[str] = "conv",
         num_pe_neuron: int = 40,
         pe_type: str = "neuron",
-        pe_mode: str = "concat",  # "add" or "concat"
+        pe_mode: str = "concat",  # "add" or concat
         neuron_pe_scale: float = 10000.0,  # "100" or "1000" or "10000"
     ):
-        """
-        Args:
-            num_channels: The number of convolutional channels in each layer.
-            kernel_size: The kernel size of convolutional layers.
-            dropout: Dropout rate.
-        """
         super().__init__()
-        self.pe_type = pe_type
-        self._snn_backend = "snntorch"
-        self.pe_mode = pe_mode
-        self.num_pe_neuron = num_pe_neuron
-        self.hidden_size   = args.hidden_size  
-        self.num_steps = args.T    
-        self.input_size = args.feature_size  
-        self.pre_length = args.pre_length      
-        self.num_levels = args.blocks
+        self._snn_backend = "spikingjelly"
+        self.hidden_size   = args.hidden_size
+        self.num_steps   = args.T
+        self.input_size = args.feature_size
+        self.pre_length   = args.pre_length
+        self.layers       = args.blocks
         self.pe_type = pe_type
         self.pe_mode = pe_mode
         self.num_pe_neuron = num_pe_neuron
-        self.kernel_size = args.kernel_size
-
-        self.encoder = SpikeEncoder[self._snn_backend][encoder_type](self.hidden_size)
+        self.neuron_pe_scale = neuron_pe_scale
+        self.temporal_encoder = SpikeEncoder[self._snn_backend][encoder_type](self.num_steps)
         self.args = args
 
- 
         self.pe = PositionEmbedding(
             pe_type=pe_type,
             pe_mode=pe_mode,
@@ -545,42 +420,44 @@ class SpikeTCN(nn.Module):
             dropout=0.1,
             num_steps=self.num_steps,
         )
-        layers = []
-        num_channels = [channel] * self.num_levels
-        num_channels.append(1)
-        for i in range(self.num_levels + 1):
-            dilation_size = dilation**i
-            in_channels = self.hidden_size if i == 0 else num_channels[i - 1]
-            out_channels = num_channels[i]
-            layers += [
-                SpikeTemporalBlock2D(
-                    in_channels,
-                    out_channels,
-                    self.kernel_size,
-                    stride=stride,
-                    dilation=dilation_size,
-                    padding=(self.kernel_size - 1) * dilation_size,
-                    num_steps=self.num_steps,
-                )
-            ]
 
-        self.network = nn.Sequential(*layers)
-        if (self.pe_type == "neuron" and self.pe_mode == "concat") or (
-            self.pe_type == "random" and self.pe_mode == "concat"
-        ):
-            self.__output_size = args.feature_size + num_pe_neuron
+        if self.pe_type == "neuron" and self.pe_mode == "concat":
+            self.dim = hidden_size + num_pe_neuron
         else:
-            self.__output_size =  args.seq_length
+            self.dim = hidden_size
 
+        if self.pe_type == "neuron" and self.pe_mode == "concat":
+            self.encoder = nn.Linear(input_size + num_pe_neuron, self.dim)
+        else:
+            self.encoder = nn.Linear(input_size, self.dim)
+
+        self.init_lif = neuron.LIFNode(
+            tau=tau,
+            step_mode="m",
+            detach_reset=detach_reset,
+            surrogate_function=surrogate.ATan(),
+            v_threshold=1.0,
+            backend=backend,
+        )
+
+        self.net = nn.Sequential(
+            *[
+                SpikeRNNCell(input_size=self.dim, output_size=self.dim)
+                for i in range(layers)
+            ]
+        )
+
+        self.__output_size = self.dim
         self.fc1 = nn.Linear(self.__output_size, args.feature_size)
         self.fc2 = nn.Linear(args.seq_length, self.pre_length)
         self.to('cuda:0') 
 
-    def forward(self, inputs: torch.Tensor):
-        utils.reset(self.encoder)
-        for layer in self.network:
-            utils.reset(layer)
-        
+
+    def forward(
+        self,
+        inputs: torch.Tensor,
+    ):
+        functional.reset_net(self)
         if self.args.normalize:
             mean = inputs.mean(dim=1, keepdim=True).detach() # shape [B, 1, D]
             inputs = inputs - mean
@@ -588,25 +465,25 @@ class SpikeTCN(nn.Module):
             std = torch.sqrt(torch.var(inputs, dim=1, keepdim=True, unbiased=False) + 1e-5).detach()
             inputs = inputs / std
 
-        inputs = self.encoder(inputs)  # B, H, C, L
-        if self.pe_type != "none":
-            # B, H, C, L -> H B L C' -> B H C' L
-            inputs = self.pe(inputs.permute(1, 0, 3, 2)).permute(1, 0, 3, 2)
-        spks = self.network(inputs)
-        spks = spks.squeeze(1)  # B, C', L
 
-        preds = self.fc1(spks.permute(0, 2, 1))  # B, L, C
-        preds = self.fc2(preds.permute(0, 2, 1))  # B, C', L
-        #.squeeze(-1) # B, O, C'
+        hiddens = self.temporal_encoder(inputs)  # T, B, C, L
+        hiddens = hiddens.transpose(-2, -1)  # T, B, L, C
+        T, B, L, _ = hiddens.size()  # T, B, L, D
+        if self.pe_type != "none":
+            hiddens = self.pe(hiddens)  # T B L C'
+        hiddens = self.encoder(hiddens.flatten(0, 1)).reshape(T, B, L, -1)  # T B L D
+        hiddens = self.init_lif(hiddens)
+        hiddens = self.net(hiddens)  # T, B, L, D
+        out = hiddens.mean(0) # B, L, D
+        preds = self.fc1(out)  # B, L, C
+        preds = self.fc2(preds.permute(0, 2, 1))  # B, C, L
         preds = preds.permute(0, 2, 1).contiguous()
+
         if self.args.normalize:
             preds = preds * std + mean  # denormalize
-        aux = {'gate_l0': torch.tensor(0.0, device=preds.device)}
+            
+        aux = {'gate_l0': torch.tensor(0.0, device=preds.device)} # placeholder
         
         return preds, aux
-
-    @property
-    def output_size(self):
-        return self.__output_size
 
 
