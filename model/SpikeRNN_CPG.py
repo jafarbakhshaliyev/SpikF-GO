@@ -379,7 +379,7 @@ class SpikeRNNCell(nn.Module):
         return x
 
 
-class SpikeRNN(nn.Module):
+class SpikeRNN_CPG(nn.Module):
 
     def __init__(
         self,

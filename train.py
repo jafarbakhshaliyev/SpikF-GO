@@ -24,8 +24,8 @@ from model.TS_TCN import TSTCN
 from model.TS_Former import TSFormer
 from model.SpikeGRU import SpikeGRU
 from model.Spikformer_CPG import Spikformer_CPG
-from model.SpikeRNN import SpikeRNN
-from model.SpikeTCN import SpikeTCN
+from model.SpikeRNN_CPG import SpikeRNN_CPG
+from model.SpikeTCN_CPG import SpikeTCN_CPG
 from model.TS_TCN import TSLIFNode
 
 
@@ -78,7 +78,6 @@ def _inverse_if_possible(arr: np.ndarray, scaler):
     if scaler is None:
         return arr
     if not hasattr(scaler, "inverse_transform"):
-        print("WHAT THE FUCK")
         return arr
 
     if arr.ndim < 2:
@@ -130,8 +129,8 @@ parser.add_argument('--T', type=int, default=16)
 parser.add_argument('--proj_dim', type=int, default=16, help='proj dim')
 parser.add_argument('--model', type=str, default='FGN', help='model name')
 
-parser.add_argument('--patch_num', type=int, default=48)
-parser.add_argument('--patch_dim', type=int, default=32)
+parser.add_argument('--patch_num', type=int, default=4)
+parser.add_argument('--patch_dim', type=int, default=16)
 parser.add_argument('--blocks', type=int, default=1)
 parser.add_argument('--energy_loss', type=bool, default=False)
 parser.add_argument('--normalize', action='store_false', help='Disable normalization')
@@ -202,7 +201,7 @@ print("Val samples:", len(val_set))
 print("Test samples:", len(test_set))
 
 
-MODELS_SET2 = ["TSGRU", "TSTCN", "TSFormer", "Spikformer_CPG", "SpikeGRU", "SpikeRNN", "SpikeTCN"]
+MODELS_SET2 = ["TSGRU", "TSTCN", "TSFormer", "Spikformer_CPG", "SpikeGRU", "SpikeRNN_CPG", "SpikeTCN_CPG"]
 
 
 
@@ -398,13 +397,13 @@ if __name__ == '__main__':
                              num_steps=args.T, input_size=args.feature_size)
             my_optim = torch.optim.RMSprop(params=model.parameters(), lr=args.learning_rate, eps=1e-08)
             my_lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer=my_optim, gamma=args.decay_rate)
-        elif args.model == 'SpikeRNN':
-            model = SpikeRNN(args, hidden_size=args.hidden_size, layers=args.blocks,
+        elif args.model == 'SpikeRNN_CPG':
+            model = SpikeRNN_CPG(args, hidden_size=args.hidden_size, layers=args.blocks,
                              num_steps=args.T, input_size=args.feature_size)
             my_optim = torch.optim.RMSprop(params=model.parameters(), lr=args.learning_rate, eps=1e-08)
             my_lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer=my_optim, gamma=args.decay_rate)
-        elif args.model == 'SpikeTCN':
-            model = SpikeTCN(args=args, num_levels=args.blocks)
+        elif args.model == 'SpikeTCN_CPG':
+            model = SpikeTCN_CPG(args=args, num_levels=args.blocks)
             my_optim = torch.optim.RMSprop(params=model.parameters(), lr=args.learning_rate, eps=1e-08)
             my_lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer=my_optim, gamma=args.decay_rate)
         else:

@@ -1,10 +1,5 @@
 # -*- coding:utf-8 -*-
-"""
 
-Author:
-    Weichen Shen,weichenswc@163.com
-
-"""
 import numpy as np
 import torch
 import os

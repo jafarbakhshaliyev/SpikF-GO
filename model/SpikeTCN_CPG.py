@@ -472,7 +472,7 @@ class SpikeTemporalBlock2D(nn.Module):
         return res
 
 
-class SpikeTCN(nn.Module):
+class SpikeTCN_CPG(nn.Module):
     
 
     def __init__(
