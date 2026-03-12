@@ -1270,7 +1270,7 @@ class TSFormer(nn.Module):
         self.dim = 256
         self.d_ff = 1024
         self.T = args.T
-        self.depths = depths
+        self.depths = args.blocks
         self.pe_type = pe_type
         self.pe_mode = pe_mode
         self.num_pe_neuron = num_pe_neuron
