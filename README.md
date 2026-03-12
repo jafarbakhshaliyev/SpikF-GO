@@ -78,3 +78,4 @@ If needed, make the script executable:
 chmod +x scripts/ecl.sh
 ./scripts/ecl.sh
 ```
+Due to double-blind review, we provide a minimal runnable example for the Electricity dataset. The full training framework and scripts for all datasets will be released after acceptance.
