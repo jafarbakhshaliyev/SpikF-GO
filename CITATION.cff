@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+title: "SpikF-GO: Spiking Fourier Graph Operators for Multivariate Time Series Forecasting"
+message: "If you use this code, please cite our ECML PKDD 2026 paper."
+authors:
+  - family-names: Bakhshaliyev
+    given-names: Jafar
+  - family-names: Landwehr
+    given-names: Niels
+year: 2026
+conference: "ECML PKDD 2026"
+repository-code: "https://github.com/jafarbakhshaliyev/SpikF-GO"
+license: MIT

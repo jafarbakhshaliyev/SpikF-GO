@@ -1,3 +1,14 @@
+# Project-specific: datasets, checkpoints, logs, outputs
+data/*
+!data/data_loader.py
+!data/.gitkeep
+outputs/
+logs/
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
